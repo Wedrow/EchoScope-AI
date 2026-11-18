@@ -2,7 +2,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/ledrodh/EchoScope-AI/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
+[![CI](https://github.com/Wedrow/EchoScope-AI/actions/workflows/ci.yml/badge.svg)](.github/workflows/ci.yml)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checker: Pyright](https://img.shields.io/badge/type%20checker-pyright-2b5b84.svg)](https://github.com/microsoft/pyright)
 [![Coverage: 94.6%](https://img.shields.io/badge/coverage-94.6%25-brightgreen)](docs/testing-strategy.md)
@@ -120,7 +120,7 @@ The dashboard provides a decoupled visual interface consuming exclusively `Pipel
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/ledrodh/EchoScope-AI.git
+git clone https://github.com/Wedrow/EchoScope-AI.git
 cd EchoScope-AI
 ```
 
