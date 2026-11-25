@@ -86,3 +86,20 @@ def test_strict_precedence_order(tmp_path, monkeypatch):
     # Explicit constructor argument wins over everything
     settings_init = Settings(YOUTUBE_API_KEY="from_init_arg")
     assert settings_init.youtube_api_key == "from_init_arg"
+
+
+def test_config_rejects_empty_db_path_and_invalid_app_env(monkeypatch):
+    """Validate DB_PATH non-emptiness and APP_ENV allowed values."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(DB_PATH="   ")
+
+    monkeypatch.setenv("APP_ENV", "invalid_staging_env")
+    with pytest.raises(ValidationError):
+        Settings()
+
+    monkeypatch.setenv("APP_ENV", "  Production ")
+    normalized = Settings()
+    assert normalized.app_env == "production"

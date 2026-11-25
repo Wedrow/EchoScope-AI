@@ -10,6 +10,7 @@ Streamlit secrets (.streamlit/secrets.toml), enforcing a strict precedence:
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import (
@@ -69,7 +70,7 @@ class Settings(BaseSettings):
         alias="DB_PATH",
         description="Path to SQLite database file",
     )
-    app_env: str = Field(
+    app_env: Literal["development", "testing", "production"] = Field(
         default="development",
         alias="APP_ENV",
         description="Execution environment: development, testing, or production",
@@ -92,6 +93,22 @@ class Settings(BaseSettings):
             StreamlitSecretsSettingsSource(settings_cls),
             file_secret_settings,
         )
+
+    @field_validator("db_path", mode="before")
+    @classmethod
+    def validate_db_path(cls, v: object) -> str:
+        """Ensure DB_PATH is a non-empty string."""
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("DB_PATH cannot be empty.")
+        return v.strip()
+
+    @field_validator("app_env", mode="before")
+    @classmethod
+    def normalize_app_env(cls, v: object) -> object:
+        """Normalize APP_ENV casing and whitespace before Literal validation."""
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
 
     @field_validator("youtube_api_key", "gemini_api_key", mode="before")
     @classmethod

@@ -2,12 +2,13 @@ schema_version: 1
 
 language: python
 framework: streamlit
-project_type: cli
+project_type: web_app
 
 profile: standard
 
 source_paths:
   - src
+  - ui
 test_paths:
   - tests
 
@@ -23,3 +24,26 @@ security:
 
 api_testing:
   enabled: false
+
+checks:
+  ui:
+    enabled: true
+    runner: streamlit_apptest
+    entrypoint: ui/app.py
+    smoke_scenarios:
+      - empty_state
+  persistence:
+    enabled: true
+    backend: sqlite
+    mode: file
+  concurrency:
+    enabled: true
+    backend: sqlite
+    workers: 5
+  preflight:
+    enabled: true
+    environment: sanitized
+    scenarios:
+      - missing_optional_key
+      - missing_required_db
+      - invalid_config

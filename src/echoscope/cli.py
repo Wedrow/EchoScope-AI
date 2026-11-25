@@ -1,9 +1,13 @@
 """Headless Command-Line Interface (CLI) for EchoScope AI."""
 
 import argparse
+import sqlite3
 import sys
 from collections.abc import Sequence
 
+from pydantic import ValidationError
+
+from echoscope.config import get_settings
 from echoscope.services.pipeline_service import PipelineService, _parse_date
 
 EXIT_SUCCESS = 0
@@ -16,6 +20,14 @@ def _build_parser() -> argparse.ArgumentParser:
     base_parser = argparse.ArgumentParser(add_help=False)
     base_parser.add_argument("--db", type=str, default=None, help="Path to SQLite database file")
 
+    sub_base_parser = argparse.ArgumentParser(add_help=False)
+    sub_base_parser.add_argument(
+        "--db",
+        type=str,
+        default=argparse.SUPPRESS,
+        help="Path to SQLite database file",
+    )
+
     parser = argparse.ArgumentParser(
         prog="echoscope",
         description="EchoScope AI — Headless YouTube Competitive Intelligence CLI",
@@ -27,7 +39,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Command: collect
     collect_parser = subparsers.add_parser(
         "collect",
-        parents=[base_parser],
+        parents=[sub_base_parser],
         help="Execute an isolated collection and snapshot run",
     )
     collect_parser.add_argument(
@@ -50,14 +62,14 @@ def _build_parser() -> argparse.ArgumentParser:
     # Command: list-runs
     subparsers.add_parser(
         "list-runs",
-        parents=[base_parser],
+        parents=[sub_base_parser],
         help="List all completed and partial analysis runs",
     )
 
     # Command: overview
     overview_parser = subparsers.add_parser(
         "overview",
-        parents=[base_parser],
+        parents=[sub_base_parser],
         help="Display macro metrics and market share for a run",
     )
     overview_parser.add_argument("--run-id", required=True, help="Analysis run identifier")
@@ -65,7 +77,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Command: report
     report_parser = subparsers.add_parser(
         "report",
-        parents=[base_parser],
+        parents=[sub_base_parser],
         help="Generate structured strategic AI analysis for a channel",
     )
     report_parser.add_argument("--run-id", required=True, help="Analysis run identifier")
@@ -77,7 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Command: compare
     compare_parser = subparsers.add_parser(
         "compare",
-        parents=[base_parser],
+        parents=[sub_base_parser],
         help="Compare channel growth velocity between two snapshot runs",
     )
     compare_parser.add_argument("--channel-id", required=True, help="Target YouTube channel ID")
@@ -255,22 +267,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    service = PipelineService(db_path=args.db)
+    try:
+        get_settings()
+    except (ValidationError, ValueError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return EXIT_INVALID_ARGUMENTS
 
-    handlers = {
-        "collect": handle_collect,
-        "list-runs": handle_list_runs,
-        "overview": handle_overview,
-        "report": handle_report,
-        "compare": handle_compare,
-    }
+    try:
+        service = PipelineService(db_path=args.db)
+    except (OSError, sqlite3.Error) as exc:
+        print(f"Database initialization error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
 
-    handler = handlers.get(args.command)
-    if not handler:
-        parser.print_help()
-        return 1
+    try:
+        handlers = {
+            "collect": handle_collect,
+            "list-runs": handle_list_runs,
+            "overview": handle_overview,
+            "report": handle_report,
+            "compare": handle_compare,
+        }
 
-    return handler(service, args)
+        handler = handlers.get(args.command)
+        if not handler:
+            parser.print_help()
+            return EXIT_ERROR
+
+        return handler(service, args)
+    finally:
+        service.close()
 
 
 if __name__ == "__main__":

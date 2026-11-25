@@ -59,3 +59,16 @@ pythonpath = [".", "src"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+addopts = "--strict-markers"
+markers = [
+    "integration: testes de integracao",
+    "e2e: testes ponta a ponta",
+    "slow: testes lentos",
+    "persistence: testes de persistencia com conexoes independentes",
+    "concurrency: testes de concorrencia deterministica",
+    "multiprocess: testes de concorrencia multiprocesso (Extended)",
+    "ui: testes de interface Streamlit AppTest",
+    "ui_smoke: teste rapido de estado vazio da interface",
+    "preflight: testes de inicializacao em ambiente limpo",
+    "preflight_basic: smoke test de inicializacao em ambiente limpo",
+]

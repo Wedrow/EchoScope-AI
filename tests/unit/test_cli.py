@@ -195,3 +195,60 @@ def test_cli_overview_and_compare_with_populated_data(capsys, tmp_path):
     assert "GROWTH SIGNALS COMPARISON" in captured_cmp.out
     assert "UC_A" in captured_cmp.out
     assert "Gross Positive Growth:     +6,000 views" in captured_cmp.out
+
+
+def test_cli_global_db_flag_before_subcommand(tmp_path, capsys):
+    """Ensure --db before subcommand is not overwritten by subparser defaults."""
+    db_file = tmp_path / "before_subcmd.db"
+    exit_code = main(["--db", str(db_file), "list-runs"])
+    assert exit_code == 0
+    assert db_file.exists()
+    captured = capsys.readouterr()
+    assert "No analysis runs recorded yet." in captured.out
+
+
+def test_cli_invalid_config_and_unwritable_db_exit_cleanly(tmp_path, monkeypatch, capsys):
+    """Ensure invalid configuration or unwritable DB exits with controlled status codes."""
+    monkeypatch.setenv("APP_ENV", "invalid_env_mode")
+    assert main(["list-runs", "--db", ":memory:"]) == 2
+    assert "Configuration error" in capsys.readouterr().err
+
+    monkeypatch.setenv("APP_ENV", "testing")
+    blocker = tmp_path / "file_blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+    assert main(["list-runs", "--db", str(blocker / "child.db")]) == 1
+    assert "Database initialization error" in capsys.readouterr().err
+
+
+def test_cli_list_runs_nonempty_and_report_error(tmp_path, capsys):
+    """Exercise non-empty list-runs table formatting and controlled report error exit."""
+    from datetime import date
+
+    from echoscope.database.models import AnalysisRun
+    from echoscope.services.pipeline_service import PipelineService
+
+    db_file = tmp_path / "cli_runs.db"
+    with PipelineService(db_path=db_file) as svc:
+        svc.repository.create_run(
+            AnalysisRun(
+                run_id="run_cli_1",
+                period_start=date(2026, 1, 1),
+                period_end=date(2026, 1, 10),
+                status="completed",
+            )
+        )
+
+    assert main(["--db", str(db_file), "list-runs"]) == 0
+    out = capsys.readouterr().out
+    assert "run_cli_1" in out
+
+    assert (
+        main(["--db", str(db_file), "report", "--run-id", "run_cli_1", "--channel-id", "UC_X"]) == 0
+    )
+    assert "ECHOSCOPE STRATEGIC REPORT: UC_X" in capsys.readouterr().out
+
+    assert (
+        main(["--db", str(db_file), "report", "--run-id", "missing_run", "--channel-id", "UC_X"])
+        == 1
+    )
+    assert "Error generating report" in capsys.readouterr().err

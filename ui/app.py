@@ -5,10 +5,12 @@ connections, NO raw SQL queries, and NO direct external API clients.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pandas as pd
 import streamlit as st
 
+from echoscope.config import get_settings
 from echoscope.services.pipeline_service import PipelineService, _parse_date
 from ui.components.cards import render_channel_kpis, render_metric_card
 from ui.components.charts import (
@@ -17,7 +19,12 @@ from ui.components.charts import (
     render_video_scatter_chart,
     render_views_bar_chart,
 )
-from ui.components.tables import render_channels_table, render_videos_table
+from ui.components.styles import inject_dashboard_styles, render_context_banner
+from ui.components.tables import (
+    render_channels_table,
+    render_growth_videos_table,
+    render_videos_table,
+)
 
 # Page Configuration
 st.set_page_config(
@@ -29,13 +36,40 @@ st.set_page_config(
 
 
 @st.cache_resource
-def get_service() -> PipelineService:
-    """Returns singleton pipeline service instance."""
-    return PipelineService()
+def get_service(db_path: str) -> PipelineService:
+    """Returns cached pipeline service instance keyed by database path."""
+    return PipelineService(db_path=db_path)
+
+
+def _find_previous_baseline_overview(
+    service: PipelineService,
+    active_run_id: str,
+) -> dict[str, Any] | None:
+    """Finds the immediately preceding completed/partial run to compute T0 -> T1 deltas."""
+    runs = service.list_runs()
+    if len(runs) < 2:
+        return None
+
+    active_idx: int | None = None
+    for idx, r in enumerate(runs):
+        if r.get("run_id") == active_run_id:
+            active_idx = idx
+            break
+
+    candidates = runs[active_idx + 1 :] if active_idx is not None else runs
+    for cand in candidates:
+        cand_id = str(cand.get("run_id") or "")
+        if cand_id and cand_id != active_run_id and cand.get("status") in ("completed", "partial"):
+            try:
+                return service.get_run_overview(cand_id)
+            except Exception:
+                continue
+    return None
 
 
 def main() -> None:
-    service = get_service()
+    inject_dashboard_styles()
+    service = get_service(get_settings().db_path)
 
     if "active_run_id" not in st.session_state:
         st.session_state["active_run_id"] = None
@@ -188,7 +222,6 @@ def main() -> None:
                     st.session_state["active_run_id"] = options[selected_label]
 
     # --- MAIN CONTENT AREA ---
-    # Display any collection feedback from previous action
     feedback = st.session_state.get("collection_feedback")
     if feedback:
         fb_type = feedback.get("type", "info")
@@ -228,20 +261,22 @@ def main() -> None:
     macro_data = overview["macro_data"]
     metrics_list = overview["metrics"]
     market_share = overview.get("tracked_views_share", overview.get("market_share", []))
+    run_channels = service.get_run_channels(active_run_id)
 
-    # Header
-    st.subheader(f"Execution Run: `{active_run_id}`")
-    st.caption(
-        f"Monitoring Window: {run_meta.get('period_start')} to {run_meta.get('period_end')} | "
-        f"Status: **{run_meta.get('status', '').upper()}** | "
-        f"Metrics Engine: v{run_meta.get('metrics_version', '1.0')}"
+    # Top Context Header Banner + accessible subheader
+    render_context_banner(
+        run_id=active_run_id,
+        period_start=run_meta.get("period_start"),
+        period_end=run_meta.get("period_end"),
+        status=str(run_meta.get("status", "")),
+        metrics_version=str(run_meta.get("metrics_version", "1.0")),
     )
+    st.subheader(f"Execution Run: `{active_run_id}`")
 
     if run_meta.get("status") == "failed":
         st.error(
             f"Execution run `{active_run_id}` ended with status **FAILED**. No video metrics were collected."
         )
-        run_chans = service.get_run_channels(active_run_id)
         input_attempts = service.get_run_input_attempts(active_run_id)
         if input_attempts:
             st.markdown("#### Channel Collection Attempts")
@@ -251,9 +286,9 @@ def main() -> None:
                 st.markdown(
                     f"- **{att.get('requested_identifier')}**: ❌ `{att.get('status')}` (`{err}`){msg}"
                 )
-        elif run_chans:
+        elif run_channels:
             st.markdown("#### Channel Collection Breakdown")
-            for ch in run_chans:
+            for ch in run_channels:
                 err = ch.get("error_code") or "Unknown error"
                 st.markdown(
                     f"- **{ch.get('handle', ch.get('channel_id'))}**: ❌ `{ch.get('status')}` ({err})"
@@ -265,14 +300,14 @@ def main() -> None:
 
     tab_macro, tab_videos, tab_growth, tab_ai = st.tabs(
         [
-            "📊 Market Overview",
-            "🎬 Video Explorer",
-            "📈 Growth Signals",
-            "🤖 Strategic AI Report",
+            "Ranking de Canais & Mercado",
+            "Explorador de Vídeos",
+            "Sinais de Crescimento",
+            "Diagnóstico Estratégico IA",
         ]
     )
 
-    # ---------------- TAB 1: MACRO & MARKET SHARE ----------------
+    # ---------------- TAB 1: RANKING DE CANAIS & OVERVIEW ----------------
     with tab_macro:
         st.markdown("### Sample Competitive Overview")
         if not metrics_list:
@@ -289,6 +324,22 @@ def main() -> None:
             with col_m3:
                 render_metric_card("Total Sample Views", f"{total_tracked_views:,}")
 
+            st.markdown("### Ranking de Canais")
+            baseline_overview = _find_previous_baseline_overview(service, active_run_id)
+            base_macro = baseline_overview["macro_data"] if baseline_overview else None
+            base_metrics = baseline_overview["metrics"] if baseline_overview else None
+            base_label = str(baseline_overview["run"]["run_id"]) if baseline_overview else None
+
+            render_channels_table(
+                macro_df=macro_data,
+                metrics_list=metrics_list,
+                channel_details=run_channels,
+                baseline_macro_df=base_macro,
+                baseline_metrics_list=base_metrics,
+                baseline_label=base_label,
+                key_prefix=f"ch_rank_{active_run_id}",
+            )
+
             st.divider()
 
             c_chart1, c_chart2 = st.columns(2)
@@ -296,10 +347,6 @@ def main() -> None:
                 render_views_bar_chart(macro_data)
             with c_chart2:
                 render_market_share_pie(market_share)
-
-            st.divider()
-            st.markdown("### Channel Breakdown")
-            render_channels_table(macro_data)
 
             st.divider()
             st.markdown("### Publication Format Distribution")
@@ -323,7 +370,6 @@ def main() -> None:
                 if not selected_ch_id:
                     st.info("Please select a channel to inspect.")
                 else:
-                    # Channel KPIs
                     selected_metrics = next(
                         (m for m in metrics_list if m.channel_id == selected_ch_id), None
                     )
@@ -346,10 +392,16 @@ def main() -> None:
                             videos_df[videos_df["category"].isin(selected_cats)]
                         )
 
-                        render_video_scatter_chart(filtered_df)
+                        st.markdown("#### Catálogo de Vídeos")
+                        render_videos_table(
+                            filtered_df,
+                            channel_median_views=(
+                                selected_metrics.median_views if selected_metrics else None
+                            ),
+                            key_prefix=f"vid_cat_{active_run_id}_{selected_ch_id}",
+                        )
                         st.divider()
-                        st.markdown("#### Video Catalog")
-                        render_videos_table(filtered_df)
+                        render_video_scatter_chart(filtered_df)
 
     # ---------------- TAB 3: GROWTH SIGNALS ----------------
     with tab_growth:
@@ -374,7 +426,6 @@ def main() -> None:
             with col_g3:
                 run_t1 = st.selectbox("Recent Snapshot (T1):", run_opts, index=0)
 
-            # Discover channels present in the selected runs
             channels_t0 = (
                 {
                     ch["channel_id"]: ch.get("handle") or ch["channel_id"]
@@ -464,6 +515,9 @@ def main() -> None:
                             st.caption(
                                 f"Historical videos omitted in T0: {growth.unmatched_historical_videos_count}"
                             )
+
+                        st.markdown("#### Evolução por Vídeo Comparável (T0 → T1)")
+                        render_growth_videos_table(growth.video_items)
 
                     except Exception as ex:
                         st.error(f"Error computing growth signals: {ex}")

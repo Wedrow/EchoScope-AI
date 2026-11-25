@@ -58,8 +58,10 @@ class PipelineService:
     ):
         if conn is not None:
             self.conn = conn
+            self._owns_conn = False
         else:
             self.conn = get_db_connection(db_path=db_path)
+            self._owns_conn = True
 
         # Ensure database tables exist
         init_schema(self.conn)
@@ -70,6 +72,18 @@ class PipelineService:
 
         # Reconcile any runs that were abruptly interrupted
         self.reconcile_interrupted_runs()
+
+    def close(self) -> None:
+        """Close the owned SQLite connection if this service created it."""
+        if self._owns_conn:
+            self.conn.close()
+            self._owns_conn = False
+
+    def __enter__(self) -> "PipelineService":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     @property
     def youtube_client(self) -> YouTubeClient:
